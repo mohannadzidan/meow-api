@@ -2,7 +2,7 @@
 The Server provides a number of endpoints (RESFTful endpoints)
 
 ## Authentication `/api/auth`
-Is done using JWT id token, an authorized request is sent with a header `id-token ` if the token is not specified, expired or invalid the response will have a status of 401 UNAUTHORIZED HTTP status code and an empty body.
+Is done using JWT id token, an authorized request is sent with a header `id-token` if the token is not specified, expired or invalid the request with fail with 401 UNAUTHORIZED HTTP status code.
 | METHOD | Description                              | implemented |
 |--------|------------------------------------------|-------------|
 |POST    | Authenticate user using email/password   | Yes         |
@@ -15,7 +15,7 @@ The credentials is submitted to the server in the request body in the following 
     "password": "password (8-64 string)"
 }
 ```
-A successful request will be indicated by a 200 OK HTTP status code and the body of the response will be ordinary user data in a addition to a `"token"` property that contains the  `id-token `.
+A successful request will be indicated by a 200 OK HTTP status code and the body of the response will be ordinary user data in a addition to a `"token"` property that contains the  `id-token`.
 ```json
  {
    "uid": "00d24062206944bc9b21aee0522e33a8",
@@ -112,7 +112,7 @@ An ideal post data will look like this
     "likes": 6,
     "comments": 2,
     "timestamp": "2021-05-08 12:22:32",
-    "commentsSnapshot": [ // up to 3 comments
+    "commentsSnapshot": [
         {
             "uid": "f679153bf1df43cabd8c3bc4f416a02c",
             "liked": true,
