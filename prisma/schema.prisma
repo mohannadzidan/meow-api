@@ -1,0 +1,49 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+model comment {
+  uid       String   @id @db.VarChar(32)
+  userUid   String   @db.VarChar(32)
+  postUid   String   @db.VarChar(32)
+  timestamp DateTime @default(now()) @db.Timestamp(0)
+  content   String   @db.VarChar(350)
+}
+
+model post {
+  uid           String   @id @db.VarChar(32)
+  sharedPostUid String?  @db.VarChar(32)
+  timestamp     DateTime @default(now()) @db.Timestamp(0)
+  content       String?  @db.VarChar(350)
+  userUid       String?  @db.VarChar(32)
+}
+
+model user {
+  uid                   String   @id @db.VarChar(32)
+  email                 String   @unique @db.VarChar(255)
+  username              String   @unique @db.VarChar(16)
+  password              String   @db.VarChar(255)
+  displayName           String   @db.VarChar(45)
+  displayImageUrl       String?  @db.VarChar(255)
+  registrationTimestamp DateTime @default(now()) @db.Timestamp(0)
+}
+
+model like {
+  uid       String   @id @db.VarChar(32)
+  userUid   String   @db.VarChar(32)
+  itemUid   String   @db.VarChar(32)
+  timestamp DateTime @default(now()) @db.Timestamp(0)
+
+  @@unique([userUid, itemUid], name: "likes_index")
+}
+
+model follow {
+  uid           String @id @db.VarChar(32)
+  secondUserUid String @db.VarChar(32)
+  firstUserUid  String @db.VarChar(32)
+}
