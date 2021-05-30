@@ -1,13 +1,12 @@
-select
-	user.uid, user.email, user.username, user.displayName, user.displayImageUrl, user.registrationTimestamp,
-    COUNT(secondUserUid) as connectionsCount,
-	GROUP_CONCAT(firstUserUid) as connections,
-	false as followed
-from
-	follow inner join user on user.uid = follow.secondUserUid
-where 
-	NOT EXISTS(select uid from follow where firstUserUid = @userUid AND secondUserUid = user.uid) AND
-	firstUserUid IN (select secondUserUid from follow where firstUserUid = @userUid)
-GROUP BY secondUserUid
-order by connectionsCount desc
-;
+SELECT 
+    user_view.*,
+    GROUP_CONCAT(follow.firstId) AS connections,
+    COUNT(id) AS connectionsCount
+FROM
+    follow
+        INNER JOIN
+    user_view ON user_view.id = follow.secondId
+WHERE
+    user_view.id NOT IN (${followingsIdSet})
+        AND follow.firstId IN (${followingsIdSet})
+GROUP BY id;

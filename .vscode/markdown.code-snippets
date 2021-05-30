@@ -1,0 +1,109 @@
+{
+    "Markdown endpoint": {
+        "scope": "markdown",
+        "prefix": "endpoint",
+        "body": [
+            "### ${1:Title}",
+            "You can $2 by issuing an HTTP ${6:POST} request to the ${3:API} `${4:endpointName}` endpoint",
+            "\n**Implemented**",
+            "${5:Yes}",
+            "\n**Method**",
+            "${6:POST}",
+            "\n**Content-Type**",
+            "${7:application/json}",
+            "\n**Endpoint**",
+            "```",
+            "http/${9:[HOST]}/api/$8/${4:endpointName}",
+            "```",
+            "\nA successful request is indicated by a `${10:200 OK}` HTTP status code."
+        ],
+        "description": "Log output to console"
+    },
+    "Markdown Authenticated endpoint": {
+        "scope": "markdown",
+        "prefix": "aendpoint",
+        "body": [
+            "### ${1:Title}",
+            "You can $2 by issuing an HTTP ${6:POST} request to the ${3:API} `${4:endpointName}` endpoint",
+            "\n**Implemented**",
+            "${5:Yes}",
+            "\n**Authentication**",
+            "Required",
+            "\n**Method**",
+            "${6:POST}",
+            "\n**Content-Type**",
+            "${7:application/json}",
+            "\n**Endpoint**",
+            "```",
+            "http/${9:[HOST]}/api/$8/${4:endpointName}",
+            "```",
+            "\nA successful request is indicated by a `${10:200 OK}` HTTP status code.",
+            "\n#### Error Codes",
+            "| Code             | Description                                       |",
+            "|------------------|---------------------------------------------------|",
+            "| ID_TOKEN_EXPIRED | Indicates that the id token needs to be refreshed |",
+            "| ID_TOKEN_INVALID | Indicates that the id is invalid.                 |",
+            "|$11|${12:_self-explanatory_}|",
+        ],
+        "description": "Log output to console"
+    },
+    "Markdown object table": {
+        "scope": "markdown",
+        "prefix": "objtable",
+        "body": [
+            "#### ${1:Title}",
+            "| Property Name | Type | Description |",
+            "|---------------|------|-------------|",
+            "|$2|$3|$4|"
+        ],
+        "description": "Log output to console"
+    },
+    "Markdown error codes table": {
+        "scope": "markdown",
+        "prefix": "errtable",
+        "body": [
+            "#### Error Codes",
+            "| Code | Description |",
+            "|------|-------------|",
+            "|$2|${3:_self-explanatory_}|"
+        ],
+        "description": "Log output to console"
+    },
+    "Markdown query param": {
+        "scope": "markdown",
+        "prefix": "param",
+        "body": [
+            "#### ${1:param}",
+            "\nThe `${1:param}` request parameter $2",
+            "```",
+            "http/${3:[HOST]}/$4/${5:endpointName}?${1:param}=$6",
+            "```"
+        ],
+        "description": "Log output to console"
+    },
+    "Markdown auth required codes": {
+        "scope": "markdown",
+        "prefix": "autherr",
+        "body": [
+            "| ID_TOKEN_EXPIRED | Indicates that the id token needs to be refreshed |",
+            "| ID_TOKEN_INVALID | Indicates that the id is invalid.|"
+        ],
+        "description": "Log output to console"
+    },
+    "after/before URI parameters": {
+        "scope": "markdown",
+        "prefix": "param-after-before",
+        "body": [
+            "#### before",
+            "\nThe `before` request parameter limits the results to only $1 before this timestamp (default value is ***now***).",
+            "```",
+            "http/[HOST]/api/$2/$3?before=TIMESTAMP",
+            "```",
+            "\n#### after",
+            "\nThe `after` request parameter limits the results to only $4 after this timestamp (default value is ***0***).",
+            "```",
+            "http/[HOST]/api/$2/$3?after=TIMESTAMP",
+            "```",
+        ]
+    }
+}

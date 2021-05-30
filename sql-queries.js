@@ -12,13 +12,16 @@ function readMysqlScripts(dir) {
         }
     });
 }
-function quoteValue(value) {
+function escapeValue(value) {
     const type = typeof value;
-    if (type === "object") {
-        throw 'cannot quote object';
-    }
     if (type === "string") {
         return "'" + value + "'";
+    }
+    if (Array.isArray(value)) {
+        return "(" + value.map(escapeValue).join() + ")";
+    }
+    if (type === "object") {
+        throw 'cannot quote object';
     }
     return value;
 }
@@ -32,7 +35,7 @@ exports.Q = function (queryName, params) {
     const query = mysqlScripts[queryName];
     if(!query) 
         throw 'Unknown query \''+queryName+'\'!';
-    let varIndex = query.indexOf('@');
+    let varIndex = query.indexOf('$');
     let varEndIndex = varIndex + 1;
     let injectedQuery = query.substring(0, varIndex === -1 ? query.length : varIndex);
     while (varIndex !== -1) {
@@ -46,10 +49,10 @@ exports.Q = function (queryName, params) {
             varName += c;
         }
         const value = params[varName];
-        if (!value)
-            throw "value of '" + varName + "' isn't specified!"
-        injectedQuery += ' ' + quoteValue(value) + ' ';
-        varIndex = query.indexOf('@', varIndex + 1);
+        if (value === undefined)
+            throw new Error("value of '" + varName + "' isn't specified!");
+        injectedQuery += ' ' + escapeValue(value) + ' ';
+        varIndex = query.indexOf('$', varIndex + 1);
         injectedQuery += query.substring(varEndIndex, varIndex === -1 ? query.length : varIndex);
         varEndIndex = varIndex + 1;
     }

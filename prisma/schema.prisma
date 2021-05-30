@@ -8,42 +8,115 @@ datasource db {
 }
 
 model comment {
-  uid       String   @id @db.VarChar(32)
-  userUid   String   @db.VarChar(32)
-  postUid   String   @db.VarChar(32)
-  timestamp DateTime @default(now()) @db.Timestamp(0)
-  content   String   @db.VarChar(350)
+  id           Int            @id @default(autoincrement()) @db.UnsignedInt
+  postId       Int?           @db.UnsignedInt
+  userId       Int?           @db.UnsignedInt
+  content      String?        @db.VarChar(350)
+  timestamp    DateTime?      @default(now()) @db.Timestamp(0)
+  post         post?          @relation(fields: [postId], references: [id])
+  user         user?          @relation(fields: [userId], references: [id])
+  comment_like comment_like[]
+
+  @@index([postId], name: "postId")
+  @@index([userId], name: "userId")
 }
 
 model post {
-  uid           String   @id @db.VarChar(32)
-  sharedPostUid String?  @db.VarChar(32)
-  timestamp     DateTime @default(now()) @db.Timestamp(0)
-  content       String?  @db.VarChar(350)
-  userUid       String?  @db.VarChar(32)
+  id           Int         @id @default(autoincrement()) @db.UnsignedInt
+  sharedPostId Int?        @db.UnsignedInt
+  userId       Int?        @db.UnsignedInt
+  content      String?     @db.VarChar(350)
+  timestamp    DateTime?   @default(now()) @db.Timestamp(0)
+  post         post?       @relation("postTopost_sharedPostId", fields: [sharedPostId], references: [id])
+  user         user?       @relation(fields: [userId], references: [id])
+  comment      comment[]
+  other_post   post[]      @relation("postTopost_sharedPostId")
+  post_like    post_like[]
+
+  @@index([sharedPostId], name: "sharedPostId")
+  @@index([userId], name: "userId")
 }
 
 model user {
-  uid                   String   @id @db.VarChar(32)
-  email                 String   @unique @db.VarChar(255)
-  username              String   @unique @db.VarChar(16)
-  password              String   @db.VarChar(255)
-  displayName           String   @db.VarChar(45)
-  displayImageUrl       String?  @db.VarChar(255)
-  registrationTimestamp DateTime @default(now()) @db.Timestamp(0)
-}
-
-model like {
-  uid       String   @id @db.VarChar(32)
-  userUid   String   @db.VarChar(32)
-  itemUid   String   @db.VarChar(32)
-  timestamp DateTime @default(now()) @db.Timestamp(0)
-
-  @@unique([userUid, itemUid], name: "likes_index")
+  id                           Int            @id @default(autoincrement()) @db.UnsignedInt
+  email                        String?        @unique @db.VarChar(64)
+  username                     String?        @unique @db.VarChar(64)
+  password                     String         @db.VarChar(300)
+  displayName                  String         @db.VarChar(64)
+  displayImageUrl              String?        @db.VarChar(255)
+  birthdate                    DateTime?      @db.Timestamp(0)
+  location                     String?        @db.VarChar(255)
+  bio                          String?        @db.VarChar(255)
+  registrationTimestamp        DateTime?      @default(now()) @db.Timestamp(0)
+  comment                      comment[]
+  comment_like                 comment_like[]
+  // follow_follow_firstIdTouser  follow[]       @relation("follow_firstIdTouser")
+  // follow_follow_secondIdTouser follow[]       @relation("follow_secondIdTouser")
+  post                         post[]
+  post_like                    post_like[]
 }
 
 model follow {
-  uid           String @id @db.VarChar(32)
-  secondUserUid String @db.VarChar(32)
-  firstUserUid  String @db.VarChar(32)
+  firstId                    Int  @db.UnsignedInt
+  secondId                   Int  @db.UnsignedInt
+  // user_follow_firstIdTouser  user @relation("follow_firstIdTouser", fields: [firstId], references: [id])
+  // user_follow_secondIdTouser user @relation("follow_secondIdTouser", fields: [secondId], references: [id])
+
+  @@id([firstId, secondId])
+  @@index([secondId], name: "fk_2")
+}
+
+model comment_like {
+  commentId Int     @db.UnsignedInt
+  userId    Int     @db.UnsignedInt
+  comment   comment @relation(fields: [commentId], references: [id])
+  user      user    @relation(fields: [userId], references: [id])
+
+  @@id([commentId, userId])
+  @@index([userId], name: "userId")
+}
+
+model post_like {
+  postId Int  @db.UnsignedInt
+  userId Int  @db.UnsignedInt
+  post   post @relation(fields: [postId], references: [id])
+  user   user @relation(fields: [userId], references: [id])
+
+  @@id([postId, userId])
+  @@index([userId], name: "userId")
+}
+
+model user_view {
+    id                    Int       @id @default(autoincrement()) @db.UnsignedInt
+    email                 String?   @unique @db.VarChar(64)
+    username              String?   @unique @db.VarChar(64)
+    password              String    @db.VarChar(300)
+    displayName           String    @db.VarChar(64)
+    displayImageUrl       String?   @db.VarChar(255)
+    birthdate             Int?
+    location              String?   @db.VarChar(255)
+    bio                   String?   @db.VarChar(255)
+    registrationTimestamp Int
+    followersCount        Int
+    followingsCount       Int
+}
+
+model post_view {
+    id            Int       @id @default(autoincrement()) @db.UnsignedInt
+    sharedPostId  Int?      @db.UnsignedInt
+    userId        Int?      @db.UnsignedInt
+    content       String?   @db.VarChar(350)
+    timestamp     Int 
+    likesCount    Int
+    commentsCount Int
+    sharesCount   Int
+}
+
+model comment_view {
+    id         Int       @id @default(autoincrement()) @db.UnsignedInt
+    postId     Int?      @db.UnsignedInt
+    userId     Int?      @db.UnsignedInt
+    content    String?   @db.VarChar(350)
+    timestamp  Int 
+    likesCount Int
 }

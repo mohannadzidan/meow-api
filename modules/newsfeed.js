@@ -1,358 +1,515 @@
 var Parsers = require('../parsers.js');
 var auth = require('./auth.js');
-var Schema = require('../schema.js');
-var gen = require('../generators.js');
-var db = require('../db.js').prisma;
-var Q = require('../sql-queries.js').Q;
-var sm = require('../server-modules.js');
+var { requireRequestBody } = require('../schema.js');
+var { db } = require('../db');
+var convertParams = require('../query-params').convertParams;
+const e = require('express');
+const { respondWithError, Errors, handleInternalError } = require('../errors.js');
+const { routeObjectFunctions, respondsWithJson } = require('../middleware/common.js');
+const { convertParam, requireParams, converters } = require('../query-params');
+const { Q } = require('../query-builder');
 
+const postCreationSchema = {
+    strict: true,
+    properties: {
+        content: {
+            type: 'string',
+            maxLength: 350,
+            minLength: 1
+        },
+        sharedPostId: {
+            type: 'number',
+            optional: true,
+        }
+    }
+};
 
-var validatePostSchema = Schema.validateJsonSchema({
-    content: {
-        type: 'string',
-        maxLength: 350,
-        minLength: 1
-    },
-    sharedPostUid: {
-        type: 'string',
-        maxLength: 32,
-        minLength: 32,
-        optional: true
-    },
-});
-
-var validateCommentSchema = Schema.validateJsonSchema({
-    content: {
-        type: 'string',
-        maxLength: 350,
-        minLength: 1
-    },
-    postUid: {
-        type: 'string',
-        maxLength: 32,
-        minLength: 32,
-    },
-});
-
-
-/**
-  * 
-  * @param {import('express').Request} req 
-  * @param {import('express').Response} res 
-  */
-function createPost(req, res) {
-    req.body.userUid = req.auth.uid;
-    req.body.uid = gen.uid();
-    if (req.body.sharedPostUid) {
-        db.post.findFirst({ where: { uid: req.body.sharedPostUid } })
-            .then(sharedPost => {
-                if (sharedPost) {
-                    req.body.sharedPostUid = sharedPost.sharedPostUid ? sharedPost.sharedPostUid : sharedPost.uid;
-                    return db.post.create({ data: req.body });
-                }
-                res.status(404).header().send();
-            }).then(q => {
-                res.status(201).header('Content-Type', 'application/json').send(q);
-            }).catch(err => {
-                res.status(500).send();
-                console.error(err);
-            })
-    } else {
-        db.post.create({ data: req.body })
-            .then(q => {
-                res.status(201).header('Content-Type', 'application/json').send(q);
-            }).catch(err => {
-                res.status(500).header().send();
-                console.error(err);
-            });
+const commentCreationSchema = {
+    strict: true,
+    properties: {
+        content: {
+            type: 'string',
+            maxLength: 350,
+            minLength: 1
+        }
     }
 
-}
+};
 
 
-
-function getPost(req, res) {
-    if (req.query.uid) {
-        db.post.findFirst({ where: { uid: req.query.uid } })
-            .then(post => {
-                if (post)
-                    res.status(200).header('Content-Type', 'application/json').send(post);
-                else
-                    res.status(404).send();
-            }).catch(err => {
-                res.status(500).send();
-                console.error(err);
-            })
-    } else if (req.query.by && req.query.timestamp) {
-        try {
-            req.query.timestamp = new Date(Number.parseInt(req.query.timestamp) * 1000).toMySQLFormat();
-        } catch (e) {
-            res.status(400).send();
-            return;
-        }
-        const timestamp = req.query.timestamp;
-        const userUid = req.query.by;
-        db.$queryRaw(Q('posts-by', {
-            userUid: userUid,
-            timestamp: timestamp,
-            commentsCount: 3,
-            postsCount: 10
-        })).then(posts => {
-            res.status(200).header('Content-Type', 'application/json').send(JSON.stringify(posts));
-        }).catch(err => {
-            res.status(500).send();
-            console.error(err);
-        })
-    } else {
-        try {
-            if (req.query.timestamp)
-                req.query.timestamp = new Date(Number.parseInt(req.query.timestamp) * 1000).toMySQLFormat();
-            else {
-                req.query.timestamp = new Date().toMySQLFormat();
-            }
-        } catch (e) {
-            res.status(400).send();
-            return;
-        }
-        const timestamp = req.query.timestamp;
-        const userUid = req.auth.uid;
-        db.$queryRaw(Q('newsfeed-posts', {
-            userUid: userUid,
-            timestamp: timestamp,
-            commentsCount: 3,
-            postsCount: 10
-        })).then(posts => {
-            res.status(200).header('Content-Type', 'application/json').send(JSON.stringify(posts));
-        }).catch(err => {
-            res.status(500).send();
-            console.error(err);
-        })
-    }
-}
-
-
-/**
-  * 
-  * @param {import('express').Request} req 
-  * @param {import('express').Response} res 
-  */
-function deletePost(req, res) {
-    if (req.query.uid) {
-        db.post.findFirst({ where: { uid: req.query.uid } })
-            .then(post => {
-                if (post && post.userUid === req.auth.uid) {
-                    return db.post.delete({ where: { uid: req.query.uid } });
-                } else if (!(post)) {
-                    res.status(404).send();
-                }
-                res.status(403).send();
-            }).then(q => {
-                res.status(200).send();
-            }).catch(err => {
-                res.status(500).send();
-                console.error(err);
-            });
-    } else {
-        res.status(400).send();
-    }
-
-}
-
-
-/**
-  * 
-  * @param {import('express').Request} req 
-  * @param {import('express').Response} res 
-  */
-function createComment(req, res) {
-
-    db.post.findFirst({ where: { uid: req.body.postUid } })
-        .then(post => {
-            if (post) {
-                req.body.userUid = req.auth.uid;
-                req.body.uid = gen.uid();
-                return db.comment.create({ data: req.body });
-            }
-            res.status(404).send();
-        }).then(q => {
-            res.status(201).header('Content-Type', 'application/json').send(q);
-        }).catch(err => {
-            res.status(500).send();
-            console.error(err);
-        });
-
-}
-
-/**
-  * 
-  * @param {import('express').Request} req 
-  * @param {import('express').Response} res 
-  */
-function getComment(req, res) {
-    if (req.query.postUid) {
-        try {
-            if (req.query.timestamp) 
-                req.query.timestamp = new Date(Number.parseInt(req.query.timestamp) * 1000).toMySQLFormat();
-             else
-                req.query.timestamp = new Date().toMySQLFormat();
-        } catch (e) {
-            res.status(400).send();
-            return;
-        }
-        db.post.findFirst({where: {uid: req.query.postUid}}).then((post) => {
-            if(post){
-                return db.comment.findMany({
-                    where: {
-                        uid: req.query.uid,
-                        AND: {
-                            timestamp: { lt: req.query.timestamp }
+var posts = {
+    /**
+     * http://[host]/api/newsfeed/posts:method
+     */
+    methods: {
+        POST: {
+            /**
+             * 
+             * @param {import('express').Request} req 
+             * @param {import('express').Response} res 
+             */
+            create: function (req, res) {
+                if (requireRequestBody(req, res, postCreationSchema)) {
+                    const content = req.body.content;
+                    // INSERT INTO post (content, sharedPostId, userId) VALUES (${content}, ${sharedPostId}, ${userId});
+                    db.post.create({
+                        data: {
+                            content: content,
+                            sharedPostId: req.body.sharedPostId,
+                            userId: req.auth.id,
                         }
-                    }, orderBy: {
-                        timestamp: 'desc'
+                    }).then(result => {
+                        // for newly created posts, add values from the view
+                        result.sharesCount = 0;
+                        result.likesCount = 0;
+                        result.commentsCount = 0;
+                        result.timestamp = Math.floor(result.timestamp.getTime() / 1000);
+                        res.status(201).send(result);
+                    }).catch(e => handleInternalError(res, e));
+                }
+            }
+        },
+        GET: {
+
+            /**
+             * 
+             * @param {import('express').Request} req 
+             * @param {import('express').Response} res 
+             */
+            from: function (req, res) {
+                if (requireParams(req, res, { user: 'integer', before: 'integer?', after: 'integer?' })) {
+                    const user = req.query.user;
+                    const before = req.query.before ?? Number.MAX_SAFE_INTEGER;
+                    const after = req.query.before ?? 0;
+                    // SELECT * FROM post_view WHERE userId = ${user} AND timestamp > ${after} AND timestamp < ${before} ORDER BY timestamp LIMIT 10; 
+                    db.post_view.findMany({
+                        where: {
+                            userId: user,
+                            AND: {
+                                timestamp: { gt: after },
+                                AND: { timestamp: { lt: before } }
+                            }
+                        },
+                        orderBy: {
+                            timestamp: 'desc',
+                        },
+                        take: 10
+
+                    }).then(posts => {
+                        res.status(200).send(posts);
+                    }).catch(e => handleInternalError(res, e));
+                }
+            },
+
+        },
+
+    },
+    /**
+    * http://[host]/api/newsfeed/posts/{postId}
+    */
+    id: {
+        /**
+         * 
+         * @param {import('express').Request} req 
+         * @param {import('express').Response} res 
+         */
+        DELETE: function (req, res) {
+            const postId = converters.integer(req.params.postId);
+            if (postId === undefined) {
+                return respondWithError(res, Errors.POST_NOT_FOUND);
+            }
+            db.post.findFirst({
+                where: { id: postId }
+            }).then(post => {
+                if (!post) {
+                    return Promise.reject(Errors.POST_NOT_FOUND);
+                }
+                if (post.userId !== req.auth.id) {
+                    return Promise.reject(Errors.PERMISSION_DENIED);
+                }
+                return db.post.delete({ where: { id: postId } });
+            }).then(() => {
+                res.status(204).send();
+            }).catch(e => {
+                if (e === Errors.PERMISSION_DENIED) {
+                    respondWithError(res, Errors.PERMISSION_DENIED);
+                } else if (e === Errors.POST_NOT_FOUND) {
+                    respondWithError(res, e);
+                } else {
+                    handleInternalError(res, e);
+                }
+            });
+        },
+
+        /**
+         *
+         * http://[host]/api/newsfeed/posts
+         * @param {import('express').Request} req 
+         * @param {import('express').Response} res 
+         */
+        GET: function (req, res) {
+            const postId = converters.integer(req.params.postId);
+            if(postId === undefined){
+                return respondWithError(res, Errors.POST_NOT_FOUND);
+            }
+            db.post_view.findFirst({
+                where: { id: postId }
+            }).then(post => {
+                if (!post) {
+                    return Promise.reject(Errors.POST_NOT_FOUND);
+                }
+                res.status(200).send(post);
+            }).catch(e => {
+                if (e === Errors.POST_NOT_FOUND) {
+                    respondWithError(res, e);
+                } else {
+                    handleInternalError(res, e);
+                }
+            });
+        },
+    },
+    /** 
+    * 
+    * @param {import('express').Request} req 
+    * @param {import('express').Response} res 
+    */
+    GET: function (req, res) {
+        if (requireParams(req, res, { before: 'integer?', after: 'integer?' })) {
+            const before = req.query.before ?? Number.MAX_SAFE_INTEGER;
+            const after = req.query.after ?? 0;
+            // get all followings
+            db.follow.findMany({
+                select: { secondId: true }, where: { firstId: req.auth.id }
+            }).then(result => {
+                // remap into set
+                const idSet = result.map((x => x.secondId));
+                idSet.push(req.auth.id) // push self id
+                return db.post_view.findMany({
+                    where: {
+                        userId: { in: idSet }, AND: {
+                            timestamp: { lt: before },
+                            AND: {
+                                timestamp: { gt: after }
+                            }
+                        }
                     },
-                    take: 10
+                    take: 10,
+                });
+            }).then(posts => {
+                res.status(200).send(posts);
+            }).catch(e => handleInternalError(res, e));
+        }
+    },
+
+}
+
+var comments = {
+    commentId: {
+        /**
+         * 
+         * http://[host]/api/posts/{postId/comments/{commentId} Method DELETE
+         * @param {import('express').Request} req 
+         * @param {import('express').Response} res 
+         */
+        DELETE: function (req, res) {
+            const commentId = converters.integer(req.params.commentId);
+            const postId = converters.integer(req.params.postId);
+            if (commentId === undefined) {
+                return respondWithError(res, Errors.COMMENT_NOT_FOUND);
+            }
+            if (postId === undefined) {
+                return respondWithError(res, Errors.POST_NOT_FOUND);
+            }
+            db.comment.findFirst({
+                where: {
+                    postId: postId,
+                    AND: {
+                        id: commentId
+                    }
+                }
+            }).then(comment => {
+                if (!comment) return Promise.reject(Errors.COMMENT_NOT_FOUND);
+                if (comment.userId !== req.auth.id) return Promise.reject(Errors.PERMISSION_DENIED);
+                return db.comment.delete({ where: { id: comment.id } });
+            }).then(() => {
+                res.status(204).send({});
+            }).catch(e => {
+                if (e === Errors.COMMENT_NOT_FOUND) {
+                    respondWithError(res, e);
+                } else {
+                    handleInternalError(res, e);
+                }
+            });
+        },
+        /**
+         * http://[host]/api/posts/{postId/comments/{commentId} Method GET
+         * @param {import('express').Request} req 
+         * @param {import('express').Response} res 
+         */
+        GET: function (req, res) {
+            const commentId = converters.integer(req.params.commentId);
+            const postId = converters.integer(req.params.postId);
+            if (commentId === undefined) {
+                return respondWithError(res, Errors.COMMENT_NOT_FOUND);
+            }
+            if (postId === undefined) {
+                return respondWithError(res, Errors.POST_NOT_FOUND);
+            }
+            db.comment_view.findFirst({
+                where: {
+                    id: commentId,
+                    AND: {
+                        postId: postId,
+                    },
+                }
+            }).then(comment => {
+                if (!comment) return Promise.reject(Errors.COMMENT_NOT_FOUND);
+                res.status(200).send(comment);
+            }).catch(e => {
+                if (e === Errors.COMMENT_NOT_FOUND) {
+                    respondWithError(res, e);
+                } else {
+                    handleInternalError(res, e);
+                }
+            });
+        }
+    },
+
+
+    /**
+    * 
+    * http://[host]/api/posts/POST_ID/comments Method GET
+    * @param {import('express').Request} req 
+    * @param {import('express').Response} res 
+    */
+    GET: function (req, res) {
+        const before = converters.integer(req.query.before) ?? Number.MAX_SAFE_INTEGER;
+        const after = converters.integer(req.query.after) ?? 0;
+        const postId = converters.integer(req.params.postId);
+        if (postId === undefined) {
+            respondWithError(res, Errors.POST_NOT_FOUND);
+            return;
+        }
+        db.comment_view.findMany({
+            where: {
+                postId: postId,
+                AND: {
+                    timestamp: {
+                        lt: before,
+                    },
+                    AND: {
+                        timestamp: {
+                            gt: after,
+                        }
+                    }
+                }
+            },
+            take: 10,
+            orderBy: {
+                timestamp: 'desc'
+            }
+        }).then(comments => {
+            res.status(200).send(comments);
+        }).catch(e => {
+            if (e === Errors.COMMENT_NOT_FOUND) {
+                respondWithError(res, e);
+            } else {
+                handleInternalError(res, e);
+            }
+        });
+    },
+    methods: {
+        POST: {
+            /**
+             * 
+             * @param {import('express').Request} req 
+             * @param {import('express').Response} res 
+             */
+            create: function (req, res) {
+                if (requireRequestBody(req, res, commentCreationSchema)) {
+                    const postId = converters.integer(req.params.postId);
+                    if (postId === undefined) {
+                        respondWithError(res, Errors.POST_NOT_FOUND);
+                        return;
+                    }
+                    req.body.userId = req.auth.id;
+                    req.body.postId = postId;
+                    db.comment.create({
+                        data: req.body
+                    }).then(comment => {
+                        comment.likesCount = 0;
+                        comment.timestamp = Math.floor(comment.timestamp.getTime() / 1000);
+                        res.status(201).send(comment);
+                    }).catch(e => {
+                        if (e.code === 'P2003' && e.meta.field_name === 'postId') {
+                            respondWithError(res, Errors.POST_NOT_FOUND);
+                        } else {
+                            handleInternalError(res, e)
+                        }
+                    });
+                }
+            }
+        }
+    },
+
+    get: {
+
+        /**
+         * 
+         * @param {import('express').Request} req 
+         * @param {import('express').Response} res 
+         */
+        lookup: function (req, res) {
+            if (requireParams(req, res, { id: 'integer' })) {
+                db.comment_view.findFirst({
+                    where: { id: req.query.id }
+                }).then(comment => {
+                    if (comment === undefined) return Promise.reject(404);
+                    res.status(200).send(comment);
+                }).catch(e => {
+                    if (e === 404) {
+                        respondWithError(res, Errors.COMMENT_NOT_FOUND);
+                    } else {
+                        handleInternalError(res, e);
+                    }
                 });
             }
-            res.status(404).send();
-            
-        }).then(comments => {
-            if (comments) {
-                res.status(200).header('Content-Type', 'application/json').send(comments);
+        },
+        /**
+        * 
+        * @param {import('express').Request} req 
+        * @param {import('express').Response} res 
+        */
+        on: function (req, res) {
+            if (requireParams(req, res, { post: 'integer' })) {
+                const before = req.query.before ?? Math.floor(Number.MAX_SAFE_INTEGER);
+                const after = req.query.after ?? 0;
+                b.post.findFirst({
+                    where: { id: req.query.post }
+                }).then(post => {
+                    if (post === undefined) return Promise.reject(404);
+                    return db.comment_view.findMany({
+                        where: {
+                            postId: post.id,
+                            AND: {
+                                timestamp: { lt: before },
+                                AND: {
+                                    timestamp: { gt: after }
+                                }
+                            }
+                        },
+                        take: 10
+                    });
+                }).then(comments => {
+                    res.status(200).send(comments);
+                }).catch(e => {
+                    if (e === 404) {
+                        respondWithError(res, Errors.POST_NOT_FOUND);
+                    } else {
+                        handleInternalError(res, e);
+                    }
+                });
             }
-        }).catch(err => {
-            res.status(500).send();
-            console.error(err);
-        });
-    } else if (req.query.uid) {
-        db.comment.findFirst({ where: { uid: req.query.uid } })
-            .then(comment => {
-                if (comment) {
-                    res.status(200).header('Content-Type', 'application/json').send(comment);
-                }
-                res.status(404).send();
-            }).catch(err => {
-                res.status(500).send();
-                console.error(err);
-            });
-    } else {
-        res.status(400).send();
+        },
+    },
+    delete: {
+        /**
+         * 
+         * @param {import('express').Request} req 
+         * @param {import('express').Response} res 
+         */
+        delete: function (req, res) {
+            if (requireParams(req, res, { id: 'integer' })) {
+                db.comment.findFirst({
+                    where: { id: req.query.id }
+                }).then(comment => {
+                    if (comment === undefined) return Promise.reject(404);
+                    if (comment.userId !== req.auth.id) return Promise.reject(403);
+                    return db.comment.delete({ where: { id: req.query.id } });
+                }).then(() => {
+                    res.status(204).send();
+                }).catch(e => {
+                    if (e === 404) {
+                        respondWithError(res, Errors.COMMENT_NOT_FOUND);
+                    } else if (e === 403) {
+                        respondWithError(res, Errors.PERMISSION_DENIED);
+                    } else {
+                        handleInternalError(res, e);
+                    }
+                });
+            }
+        },
     }
 }
 
 
-/**
-  * 
-  * @param {import('express').Request} req 
-  * @param {import('express').Response} res 
-  */
-function toggleLike(req, res) {
-    if (!req.query.uid) {
-        res.status(400).send();
-        return;
-    }
-    let result = {};
-    db.$queryRaw(`
-        SELECT 
-            (SELECT uid FROM \`like\` WHERE useruid = '${req.auth.uid}' AND itemuid = '${req.query.uid}')AS likeUid,
-            (SELECT Count(uid) FROM \`like\` WHERE  itemuid = '${req.query.uid}')  AS likes,
-            IF(EXISTS(SELECT uid FROM   post WHERE  uid = '${req.query.uid}'), 
-                'post'
-            , IF(EXISTS(SELECT uid
-                    FROM   comment
-                    WHERE  uid = '${req.query.uid}'), 'comment',
-            NULL)) AS itemType;
-    `).then(l => {
-        l = l[0];
-        if (l.itemType === null) {
-            res.status(404).send();
-        } else if (l.likeUid) {
-            result.liked = false;
-            result.likes = l.likes - 1;
-            return db.like.delete({ where: { uid: l.likeUid } })
-        } else {
-            result.liked = true;
-            result.likes = l.likes + 1;
-            return db.like.create({
-                data: {
-                    uid: gen.uid(),
-                    itemUid: req.query.uid,
-                    userUid: req.auth.uid,
-                }
-            });
-        }
-    }).then(ignored => {
-        result.itemType = undefined;
-        res.status(201).header('Content-Type', 'application/json').send(result);
-    }).catch(err => {
-        res.status(500).send();
-        console.error(err);
-    });
-}
-
-/**
-  * 
-  * @param {import('express').Request} req 
-  * @param {import('express').Response} res 
-  */
-function deleteComment(req, res) {
-    if (req.query.uid) {
-        db.comment.findFirst({ where: { uid: req.query.uid } })
-            .then(comment => {
-                if (comment && comment.userUid === req.auth.uid) {
-                    return db.comment.delete({ where: { uid: req.query.uid } });
-                } else if (!(comment)) {
-                    res.status(404).send();
-                }
-                res.status(403).send();
-            }).then(q => {
-                res.status(200).header('Content-Type', 'application/json').send({ uid: req.query.uid });
-            }).catch(err => {
-                res.status(500).send();
-                console.error(err);
-            });
-    } else {
-        res.status(400).send();
-    }
-}
 
 /**
  * 
  * @param {import('express').Express} app 
  */
 exports.init = function (app) {
-    // post
-    app.post('/api/newsfeed/post',
+
+    app.get('/api/newsfeed/posts',
         Parsers.JsonParser,
-        auth.isAuthorized,
-        validatePostSchema,
-        createPost);
-    app.get('/api/newsfeed/post',
+        respondsWithJson,
+        auth.authenticate,
+        posts.GET,
+    );
+
+    app.post('/api/newsfeed/posts::method',
         Parsers.JsonParser,
-        auth.isAuthorized,
-        getPost)
-    app.delete('/api/newsfeed/post',
+        respondsWithJson,
+        auth.authenticate,
+        routeObjectFunctions('method', posts.methods.POST),
+    );
+    app.get('/api/newsfeed/posts::method',
         Parsers.JsonParser,
-        auth.isAuthorized,
-        deletePost);
-    // comment
-    app.post('/api/newsfeed/comment',
+        respondsWithJson,
+        auth.authenticate,
+        routeObjectFunctions('method', posts.methods.GET),
+    );
+
+    app.get('/api/newsfeed/posts/:postId',
         Parsers.JsonParser,
-        auth.isAuthorized,
-        validateCommentSchema,
-        createComment);
-    app.get('/api/newsfeed/comment',
+        respondsWithJson,
+        auth.authenticate,
+        posts.id.GET,
+    );
+
+    app.delete('/api/newsfeed/posts/:postId',
         Parsers.JsonParser,
-        auth.isAuthorized,
-        getComment);
-    app.delete('/api/newsfeed/comment',
+        respondsWithJson,
+        auth.authenticate,
+        posts.id.DELETE,
+    );
+
+    app.post('/api/newsfeed/posts/:postId/comments::method',
         Parsers.JsonParser,
-        auth.isAuthorized,
-        deleteComment);
-    // like
-    app.post('/api/newsfeed/like',
+        respondsWithJson,
+        auth.authenticate,
+        routeObjectFunctions('method', comments.methods.POST),
+    );
+    app.get('/api/newsfeed/posts/:postId/comments',
         Parsers.JsonParser,
-        auth.isAuthorized,
-        toggleLike);
+        respondsWithJson,
+        auth.authenticate,
+        comments.GET
+    );
+
+    app.get('/api/newsfeed/posts/:postId/comments/:commentId',
+        Parsers.JsonParser,
+        respondsWithJson,
+        auth.authenticate,
+        comments.commentId.GET,
+    );
+
+    app.delete('/api/newsfeed/posts/:postId/comments/:commentId',
+        Parsers.JsonParser,
+        respondsWithJson,
+        auth.authenticate,
+        comments.commentId.DELETE,
+    );
 
 }
-sm.registerModule(exports);
+exports.moduleName = 'newsfeed';

@@ -1,7 +1,13 @@
 require('dotenv').config();
 var express = require('express');
+const { db } = require('./db');
 var app = express();
-var sm = require('./server-modules.js');
+
+const modules = [
+    require('./modules/auth'),
+    require('./modules/newsfeed'),
+    require('./modules/people'),
+]
 /**
  * @
  */
@@ -22,8 +28,11 @@ app.use(function (req, res, next) {
     } else next();
 });
 // init modules
-console.log('initializing modules...');
-sm.setApp(app);
+modules.forEach(module => {
+    console.log(`initializing module ${module.moduleName}...`);
+    module.init(app);
+})
+
 // define start page
 app.get('/', (req, res) => {
     res.sendFile(__dirname + '/build/index.html');
