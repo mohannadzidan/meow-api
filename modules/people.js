@@ -3,7 +3,7 @@ const { authenticate } = require('./auth.js');
 const { db } = require('../db');
 const { converters } = require('../query-params');
 const { handleInternalError, respondWithError, Errors } = require('../errors.js');
-const { selectSpecificFieldsRaw } = require('../endpoints-features.js');
+const { selectSpecificFieldsRaw, selectSpecificFields } = require('../endpoints-features.js');
 const router = require('express').Router();
 const users = {
     GET: {
@@ -101,28 +101,27 @@ const followings = {
                         respondWithError(res, Errors.PERMISSION_DENIED);
                         return;
                     }
-                    db.user.findFirst({
-                        where: { id: queriedId }
-                    }).then(queriedUser => {
-                        if (queriedUser) {
-                            return db.follow.findFirst({ where: { firstId: userId, secondId: queriedId } });
-                        } else {
-                            return Promise.reject(Errors.USER_NOT_FOUND);
-                        }
-                    }).then(follow => {
-                        if (!follow) {
-                            return db.follow.create({ data: { firstId: userId, secondId: queriedId } });
-                        } else {
-                            return db.$queryRaw`DELETE FROM follow WHERE firstId = ${userId} AND secondId  = ${queriedId}`;
-                        }
-                    }).then((x) => {
-                        let state = !Array.isArray(x);
-                        res.status(201).json({ value: state });
+                    db.follow.create({
+                        data: { firstId: userId, secondId: queriedId }
+                    }).then(() => {
+                        res.status(201).json({ state: true });
                     }).catch(err => {
-                        if (err === Errors.USER_NOT_FOUND) {
-                            respondWithError(res, err);
+                        if (err.code === 'P2002') {
+                            return db.follow.delete({
+                                where: {
+                                    firstId_secondId: { firstId: userId, secondId: queriedId }
+                                }
+                            });
+                            //respondWithError(res, Errors.USER_NOT_FOUND);
+                        } else if (err.code === 'P2003') {
+                            respondWithError(res, Errors.USER_NOT_FOUND);
                         } else {
                             handleInternalError(res, err);
+                        }
+                        return false;
+                    }).then((ok) => {
+                        if (ok) {
+                            res.status(201).json({state: false});
                         }
                     });
 
@@ -188,7 +187,50 @@ const followings = {
         },
 
     },
+    methods: {
+        GET: {
+            /**
+            * 
+            * @param {import('express').Request} req 
+            * @param {import('express').Response} res 
+            */
+            suggest: function (req, res) {
+                const authId = req.auth.id;
+                if(req.params.sourceId != authId){
+                    respondWithError(res, Errors.PERMISSION_DENIED);
+                    return;
+                }
+                const offset = converters.integer(req.query.offset) ?? 0;
+                let selection;
+                try {
+                    selection = selectSpecificFieldsRaw(req.query, followings.allowedFields, 10, 'user_view');
+                } catch (err) {
+                    respondWithError(res, err);
+                    return;
+                }
+                db.follow.findMany({
+                    select: {
+                        secondId: true,
+                    },
+                    where: {
+                        firstId: authId
+                    }
+                }).then(followings => {
+                    followings = followings.map(x => x.secondId);
+                    if (followings.length > 0) {
+                        return db.$queryRaw(`
+                        SELECT ${selection.select}, count(user_view.id) as connections FROM user_view INNER JOIN follow ON follow.secondId = user_view.id 
+                        WHERE follow.firstId IN (${followings.join(',')}) AND user_view.id <> ${authId}  GROUP BY user_view.id ORDER BY connections DESC LIMIT ${offset}, ${selection.limit};
+                        `);
+                    }
+                    return [];
 
+                }).then(suggestions => {
+                    res.status(200).json(suggestions);
+                }).catch(e => handleInternalError(res, e));
+            }
+        }
+    },
     /**
      * 
      * @param {import('express').Request} req 
@@ -197,24 +239,11 @@ const followings = {
     GET: function (req, res) {
         const queriedId = converters.integer(req.params.userId);
         const offset = converters.integer(req.query.offset) ?? 0;
-        const fields = req.query.fields;
-        let select = 'user_view.*';
-        let limit = 10;
-        let singleField = false;
-        if (fields) {
-            select = selectSpecificFieldsRaw(fields, followings.allowedFields, 'user_view');
-            if (select === undefined) {
-                respondWithError(res, Errors.BAD_REQUEST, { target: 'fields' });
-                return;
-            }
-            // select 10x the limit if only one field
-            if (fields.indexOf(',') === -1) {
-                singleField = true;
-                limit *= 10;
-            }
-        }
-        if (queriedId === undefined) {
-            respondWithError(res, Errors.USER_NOT_FOUND);
+        let selection;
+        try {
+            selection = selectSpecificFieldsRaw(req.query, followings.allowedFields, 10, 'user_view');
+        } catch (err) {
+            respondWithError(res, err);
             return;
         }
         db.user.findFirst({
@@ -222,20 +251,20 @@ const followings = {
         }).then(user => {
             if (user) {
                 return db.$queryRaw(`SELECT 
-                                        ${select}
+                                        ${selection.select}
                                     FROM 
                                         follow INNER JOIN user_view ON follow.secondId = user_view.id  
                                     WHERE 
                                         firstId = ${queriedId} 
-                                    LIMIT ${offset}, ${limit};`);
+                                    LIMIT ${offset}, ${selection.limit};`);
             } else {
                 return Promise.reject(Errors.USER_NOT_FOUND);
             }
-        }).then(followers => {
-            if(singleField){
-                followers = followers.map(x => x[fields]);
+        }).then(followings => {
+            if (selection.isSingleField) {
+                followings = followings.map(x => x[req.query.fields]);
             }
-            res.status(200).json(followers);
+            res.status(200).json(followings);
         }).catch(err => {
             if (err === Errors.USER_NOT_FOUND) {
                 respondWithError(res, err);
@@ -337,33 +366,33 @@ const followers = {
             respondWithError(res, Errors.USER_NOT_FOUND);
             return;
         }
-        const fields = req.query.fields;
-        let select = 'user_view.*';
-        let limit = 10;
-        if (fields) {
-            select = selectSpecificFieldsRaw(fields, followers.allowedFields, 'user_view');
-            if (select === undefined) {
-                respondWithError(res, Errors.BAD_REQUEST, { target: 'fields' });
-                return;
-            }
-            // select 10x the limit if only one field
-            if (fields.indexOf(',') === -1) limit *= 10;
+        let selection;
+        try {
+            selection = selectSpecificFieldsRaw(req.query, followers.allowedFields, 10, 'user_view');
+        } catch (err) {
+            console.log(err);
+
+            respondWithError(res, err);
+            return;
         }
         db.user.findFirst({
             where: { id: queriedId }
         }).then(user => {
             if (user) {
                 return db.$queryRaw(`SELECT 
-                                        ${select} 
+                                        ${selection.select} 
                                     FROM 
                                         follow INNER JOIN user_view ON follow.firstId = user_view.id  
                                     WHERE 
                                         secondId = ${queriedId} 
-                                    LIMIT ${offset}, ${limit};`);
+                                    LIMIT ${offset}, ${selection.limit};`);
             } else {
                 return Promise.reject(Errors.USER_NOT_FOUND);
             }
         }).then(followers => {
+            if (selection.isSingleField) {
+                followers = followers.map(x => x[req.query.fields]);
+            }
             res.status(200).json(followers);
         }).catch(err => {
             if (err === Errors.USER_NOT_FOUND) {
@@ -386,19 +415,15 @@ router.get('/api/people/:userId/posts',
     users.posts.GET,
 );
 
+// followers
 router.get('/api/people/:userId/followers',
     authenticate,
     followers.GET,
 );
-
+// followings
 router.get('/api/people/:userId/followings',
     authenticate,
     followings.GET,
-);
-
-router.post('/api/people/:userId/followings/:queriedId::method',
-    authenticate,
-    routeObjectFunctions('method', followings.id.POST),
 );
 
 router.post('/api/people/:sourceId/followings/:targetId',
@@ -411,6 +436,14 @@ router.delete('/api/people/:sourceId/followings/:targetId',
     followings.id.DELETE,
 );
 
+router.post('/api/people/:userId/followings::method/:queriedId',
+    authenticate,
+    routeObjectFunctions('method', followings.id.methods.POST),
+);
+router.get('/api/people/:sourceId/followings::method',
+    authenticate,
+    routeObjectFunctions('method', followings.methods.GET),
+);
 
 
 exports.router = router;
