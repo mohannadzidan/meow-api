@@ -1,14 +1,13 @@
 var Bcrypt = require('bcryptjs');
-var Parsers = require('../parsers.js');
 var { requireRequestBody } = require('../schema.js');
 var JWT = require('jsonwebtoken');
-var {db} = require('../db.js');
-var { respondsWithJson, routeObjectFunctions } = require('../middleware/common');
-const { Q } = require('../sql-queries.js');
-const { ErrorCodes, Errors, handleInternalError, handleTokenError, respondWithError } = require('../errors');
+var { db } = require('../db.js');
+var { routeObjectFunctions } = require('../middleware/common');
+const { Errors, handleInternalError, handleTokenError, respondWithError } = require('../errors');
 const secret = process.env.SECRET;
 const ID_TOKEN_EXPIRY = 86400;
 const REFRESH_TOKEN_EXPIRY = ID_TOKEN_EXPIRY * 30;
+const router = require('express').Router();
 
 var signUpSchema = {
     strict: true,
@@ -115,7 +114,7 @@ const token = {
                             expiresIn: ID_TOKEN_EXPIRY,
                             email: account.email
                         }
-                        res.status(200).send(payload);
+                        res.status(200).json(payload);
                     } else {
                         respondWithError(res, Errors.Token.INVALID_ID_TOKEN);
                     }
@@ -149,7 +148,7 @@ const accounts = {
                     expiresIn: ID_TOKEN_EXPIRY,
                     email: account.email
                 }
-                res.status(201).send(payload);
+                res.status(201).json(payload);
             }).catch(err => {
                 if (err.code === 'P2002') {
                     respondWithError(res, Errors[err.meta.target.toUpperCase() + '_ALREADY_EXISTS']);
@@ -182,7 +181,7 @@ const accounts = {
                         expiresIn: ID_TOKEN_EXPIRY,
                         email: account.email
                     }
-                    res.status(200).send(payload);
+                    res.status(200).json(payload);
                 } else {
                     respondWithError(res, Errors.WRONG_CREDENTIALS);
                 }
@@ -208,9 +207,10 @@ const accounts = {
                 db.user_view.findFirst({
                     where: { id: token.id }
                 }).then(account => {
-                    if (account)
-                        res.status(200).send(account);
-                    else
+                    if (account) {
+                        account.password = undefined;
+                        res.status(200).json(account);
+                    } else
                         respondWithError(res, Errors.USER_NOT_FOUND);
                 }).catch(e => handleInternalError(res, e));
             }
@@ -240,7 +240,7 @@ const accounts = {
                         return Promise.reject(404);
                     }
                 }).then((x) => {
-                    res.status(204).send({});
+                    res.status(204).json({});
                 }).catch(e => {
                     if (e === 404) {
                         respondWithError(res, Errors.USER_NOT_FOUND);
@@ -253,25 +253,24 @@ const accounts = {
     },
 }
 
-/**
- * 
- * @param {import('express').Express} app 
- */
-exports.init = function (app) {
-    
-    app.post('/api/auth/accounts::method',
-        Parsers.JsonParser,
-        respondsWithJson,
-        routeObjectFunctions('method', accounts)
-    );
 
-    app.post('/api/auth/token::method',
-        Parsers.JsonParser,
-        respondsWithJson,
-        routeObjectFunctions('method', token)
-    );
 
-    function promisify(func, ...params) {
+
+router.post('/api/auth/accounts::method',
+    routeObjectFunctions('method', accounts)
+);
+
+router.post('/api/auth/token::method',
+
+    routeObjectFunctions('method', token)
+);
+
+
+
+if (process.env.NODE_ENV === 'development') {
+    const nopassword = Bcrypt.hashSync('nopassword');
+    const wrongpassword = Bcrypt.hashSync('wrongpassword');
+    const promisify = function (func, ...params) {
         return new Promise((resolve, reject) => {
             func(...params, (err, result) => {
                 if (err) {
@@ -282,38 +281,33 @@ exports.init = function (app) {
             });
         });
     }
-    const nopassword = Bcrypt.hashSync('nopassword');
-    const wrongpassword = Bcrypt.hashSync('wrongpassword');
-    app.get('/api/auth/test',
-        respondsWithJson,
-        (req, res, next) => {
-            const promises = [
-                promisify(generateIdToken, 339, ID_TOKEN_EXPIRY),
-                promisify(generateIdToken, 339, 0),
-                promisify(generateIdToken, 3000, ID_TOKEN_EXPIRY),
-                promisify(generateRefreshToken, 339, nopassword, REFRESH_TOKEN_EXPIRY),
-                promisify(generateRefreshToken, 339, nopassword, 0),
-                promisify(generateRefreshToken, 339, wrongpassword, REFRESH_TOKEN_EXPIRY),
-                promisify(generateRefreshToken, 3000, nopassword, REFRESH_TOKEN_EXPIRY),
-            ];
-            Promise.all(promises).then(r => {
-                const payload = {
-                    idToken: r[0],
-                    expiredIdToken: r[1],
-                    deletedUserIdToken: r[2],
-                    refreshToken: r[3],
-                    expiredRefreshToken: r[4],
-                    wrongPasswordRefreshToken: r[5],
-                    deletedUserRefreshToken: r[6],
-                }
-                res.status(200).send(payload);
-            }).catch(e => handleInternalError(res, e));
+    router.get('/api/auth/test', (req, res, next) => {
+        const promises = [
+            promisify(generateIdToken, 339, ID_TOKEN_EXPIRY),
+            promisify(generateIdToken, 339, 0),
+            promisify(generateIdToken, 3000, ID_TOKEN_EXPIRY),
+            promisify(generateRefreshToken, 339, nopassword, REFRESH_TOKEN_EXPIRY),
+            promisify(generateRefreshToken, 339, nopassword, 0),
+            promisify(generateRefreshToken, 339, wrongpassword, REFRESH_TOKEN_EXPIRY),
+            promisify(generateRefreshToken, 3000, nopassword, REFRESH_TOKEN_EXPIRY),
+        ];
+        Promise.all(promises).then(r => {
+            const payload = {
+                idToken: r[0],
+                expiredIdToken: r[1],
+                deletedUserIdToken: r[2],
+                refreshToken: r[3],
+                expiredRefreshToken: r[4],
+                wrongPasswordRefreshToken: r[5],
+                deletedUserRefreshToken: r[6],
+            }
+            res.status(200).json(payload);
+        }).catch(e => handleInternalError(res, e));
 
-        });
+    });
 }
 
-
-
+exports.name = 'Auth';
+exports.router = router;
 exports.authenticate = authenticate;
-exports.moduleName = 'auth';
 

@@ -138,26 +138,3 @@ create view meowdb.post_view as (
   from 
     meowdb.post _post
 );
-
-
-
--- select * from post where  userId = 160 ;
--- drop trigger before_delete_comment;
--- drop trigger before_delete_post;
--- alter table post modify column userId INT UNSIGNED NOT NULL;
--- alter table post rename post_old;
--- insert into post (userId, content) values (null, 'dsada');
--- select user.id, count(post.id) as postsCount from user inner join post on userId = user.id group by user.id order by postsCount desc;
--- select * from user;
-select * from user;
-select * from user_view;
-select * from post_view;
-select * from comment_view;
-select * from post_like;
-select * from follow;
-select * from comment_like;
-
-
-
-
-

@@ -1,4 +1,5 @@
 require('dotenv').config();
+const { json } = require('body-parser');
 var express = require('express');
 const { db } = require('./db');
 var app = express();
@@ -11,7 +12,6 @@ const modules = [
 /**
  * @
  */
-
 const address = process.env.MEOW_SERVER_ADDRESS;
 const port = process.env.MEOW_SERVER_PORT;
 
@@ -27,10 +27,16 @@ app.use(function (req, res, next) {
         res.status(200).send();
     } else next();
 });
+
+
+app.use('/api', json());
+
 // init modules
-modules.forEach(module => {
-    console.log(`initializing module ${module.moduleName}...`);
-    module.init(app);
+modules.forEach((module, index) => {
+    if (!module.router) throw new Error('module at index=' + index + ' doesn\'t export a router of type express.Router!')
+    console.log('initializing module ' + (module.name ?? 'Unknown') + '...');
+    app.use(module.router);
+    if (!module.name) console.warn('Warning: the module at index=' + index + ' doesn\'t export module name.')
 })
 
 // define start page

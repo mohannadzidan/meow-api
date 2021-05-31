@@ -1,13 +1,11 @@
-var Parsers = require('../parsers.js');
 var auth = require('./auth.js');
 var { requireRequestBody } = require('../schema.js');
 var { db } = require('../db');
 var convertParams = require('../query-params').convertParams;
-const e = require('express');
 const { respondWithError, Errors, handleInternalError } = require('../errors.js');
-const { routeObjectFunctions, respondsWithJson } = require('../middleware/common.js');
-const { convertParam, requireParams, converters } = require('../query-params');
-const { Q } = require('../query-builder');
+const { routeObjectFunctions } = require('../middleware/common.js');
+const { requireParams, converters } = require('../query-params');
+const router = require('express').Router();
 
 const postCreationSchema = {
     strict: true,
@@ -64,44 +62,19 @@ var posts = {
                         result.likesCount = 0;
                         result.commentsCount = 0;
                         result.timestamp = Math.floor(result.timestamp.getTime() / 1000);
-                        res.status(201).send(result);
-                    }).catch(e => handleInternalError(res, e));
+                        res.status(201).json(result);
+                    }).catch(e => {
+                        if (e.code === 'P2003' && e.meta.field_name === 'sharedPostId') {
+                            respondWithError(res, Errors.POST_NOT_FOUND, { target: 'sharedPostId' });
+                        } else
+                            handleInternalError(res, e);
+                    });
                 }
             }
         },
         GET: {
 
-            /**
-             * 
-             * @param {import('express').Request} req 
-             * @param {import('express').Response} res 
-             */
-            from: function (req, res) {
-                if (requireParams(req, res, { user: 'integer', before: 'integer?', after: 'integer?' })) {
-                    const user = req.query.user;
-                    const before = req.query.before ?? Number.MAX_SAFE_INTEGER;
-                    const after = req.query.before ?? 0;
-                    // SELECT * FROM post_view WHERE userId = ${user} AND timestamp > ${after} AND timestamp < ${before} ORDER BY timestamp LIMIT 10; 
-                    db.post_view.findMany({
-                        where: {
-                            userId: user,
-                            AND: {
-                                timestamp: { gt: after },
-                                AND: { timestamp: { lt: before } }
-                            }
-                        },
-                        orderBy: {
-                            timestamp: 'desc',
-                        },
-                        take: 10
-
-                    }).then(posts => {
-                        res.status(200).send(posts);
-                    }).catch(e => handleInternalError(res, e));
-                }
-            },
-
-        },
+        }
 
     },
     /**
@@ -129,7 +102,7 @@ var posts = {
                 }
                 return db.post.delete({ where: { id: postId } });
             }).then(() => {
-                res.status(204).send();
+                res.status(204).json();
             }).catch(e => {
                 if (e === Errors.PERMISSION_DENIED) {
                     respondWithError(res, Errors.PERMISSION_DENIED);
@@ -149,7 +122,7 @@ var posts = {
          */
         GET: function (req, res) {
             const postId = converters.integer(req.params.postId);
-            if(postId === undefined){
+            if (postId === undefined) {
                 return respondWithError(res, Errors.POST_NOT_FOUND);
             }
             db.post_view.findFirst({
@@ -158,7 +131,7 @@ var posts = {
                 if (!post) {
                     return Promise.reject(Errors.POST_NOT_FOUND);
                 }
-                res.status(200).send(post);
+                res.status(200).json(post);
             }).catch(e => {
                 if (e === Errors.POST_NOT_FOUND) {
                     respondWithError(res, e);
@@ -196,7 +169,7 @@ var posts = {
                     take: 10,
                 });
             }).then(posts => {
-                res.status(200).send(posts);
+                res.status(200).json(posts);
             }).catch(e => handleInternalError(res, e));
         }
     },
@@ -232,9 +205,9 @@ var comments = {
                 if (comment.userId !== req.auth.id) return Promise.reject(Errors.PERMISSION_DENIED);
                 return db.comment.delete({ where: { id: comment.id } });
             }).then(() => {
-                res.status(204).send({});
+                res.status(204).json({});
             }).catch(e => {
-                if (e === Errors.COMMENT_NOT_FOUND) {
+                if (e === Errors.COMMENT_NOT_FOUND || e === Errors.PERMISSION_DENIED) {
                     respondWithError(res, e);
                 } else {
                     handleInternalError(res, e);
@@ -264,7 +237,7 @@ var comments = {
                 }
             }).then(comment => {
                 if (!comment) return Promise.reject(Errors.COMMENT_NOT_FOUND);
-                res.status(200).send(comment);
+                res.status(200).json(comment);
             }).catch(e => {
                 if (e === Errors.COMMENT_NOT_FOUND) {
                     respondWithError(res, e);
@@ -309,7 +282,7 @@ var comments = {
                 timestamp: 'desc'
             }
         }).then(comments => {
-            res.status(200).send(comments);
+            res.status(200).json(comments);
         }).catch(e => {
             if (e === Errors.COMMENT_NOT_FOUND) {
                 respondWithError(res, e);
@@ -339,7 +312,7 @@ var comments = {
                     }).then(comment => {
                         comment.likesCount = 0;
                         comment.timestamp = Math.floor(comment.timestamp.getTime() / 1000);
-                        res.status(201).send(comment);
+                        res.status(201).json(comment);
                     }).catch(e => {
                         if (e.code === 'P2003' && e.meta.field_name === 'postId') {
                             respondWithError(res, Errors.POST_NOT_FOUND);
@@ -365,7 +338,7 @@ var comments = {
                     where: { id: req.query.id }
                 }).then(comment => {
                     if (comment === undefined) return Promise.reject(404);
-                    res.status(200).send(comment);
+                    res.status(200).json(comment);
                 }).catch(e => {
                     if (e === 404) {
                         respondWithError(res, Errors.COMMENT_NOT_FOUND);
@@ -401,7 +374,7 @@ var comments = {
                         take: 10
                     });
                 }).then(comments => {
-                    res.status(200).send(comments);
+                    res.status(200).json(comments);
                 }).catch(e => {
                     if (e === 404) {
                         respondWithError(res, Errors.POST_NOT_FOUND);
@@ -427,7 +400,7 @@ var comments = {
                     if (comment.userId !== req.auth.id) return Promise.reject(403);
                     return db.comment.delete({ where: { id: req.query.id } });
                 }).then(() => {
-                    res.status(204).send();
+                    res.status(204).json();
                 }).catch(e => {
                     if (e === 404) {
                         respondWithError(res, Errors.COMMENT_NOT_FOUND);
@@ -444,72 +417,58 @@ var comments = {
 
 
 
-/**
- * 
- * @param {import('express').Express} app 
- */
-exports.init = function (app) {
 
-    app.get('/api/newsfeed/posts',
-        Parsers.JsonParser,
-        respondsWithJson,
-        auth.authenticate,
-        posts.GET,
-    );
+router.get('/api/newsfeed/posts',
+    auth.authenticate,
+    posts.GET,
+);
 
-    app.post('/api/newsfeed/posts::method',
-        Parsers.JsonParser,
-        respondsWithJson,
-        auth.authenticate,
-        routeObjectFunctions('method', posts.methods.POST),
-    );
-    app.get('/api/newsfeed/posts::method',
-        Parsers.JsonParser,
-        respondsWithJson,
-        auth.authenticate,
-        routeObjectFunctions('method', posts.methods.GET),
-    );
+router.post('/api/newsfeed/posts::method',
 
-    app.get('/api/newsfeed/posts/:postId',
-        Parsers.JsonParser,
-        respondsWithJson,
-        auth.authenticate,
-        posts.id.GET,
-    );
+    auth.authenticate,
+    routeObjectFunctions('method', posts.methods.POST),
+);
+router.get('/api/newsfeed/posts::method',
 
-    app.delete('/api/newsfeed/posts/:postId',
-        Parsers.JsonParser,
-        respondsWithJson,
-        auth.authenticate,
-        posts.id.DELETE,
-    );
+    auth.authenticate,
+    routeObjectFunctions('method', posts.methods.GET),
+);
 
-    app.post('/api/newsfeed/posts/:postId/comments::method',
-        Parsers.JsonParser,
-        respondsWithJson,
-        auth.authenticate,
-        routeObjectFunctions('method', comments.methods.POST),
-    );
-    app.get('/api/newsfeed/posts/:postId/comments',
-        Parsers.JsonParser,
-        respondsWithJson,
-        auth.authenticate,
-        comments.GET
-    );
+router.get('/api/newsfeed/posts/:postId',
 
-    app.get('/api/newsfeed/posts/:postId/comments/:commentId',
-        Parsers.JsonParser,
-        respondsWithJson,
-        auth.authenticate,
-        comments.commentId.GET,
-    );
+    auth.authenticate,
+    posts.id.GET,
+);
 
-    app.delete('/api/newsfeed/posts/:postId/comments/:commentId',
-        Parsers.JsonParser,
-        respondsWithJson,
-        auth.authenticate,
-        comments.commentId.DELETE,
-    );
+router.delete('/api/newsfeed/posts/:postId',
 
-}
-exports.moduleName = 'newsfeed';
+    auth.authenticate,
+    posts.id.DELETE,
+);
+
+router.post('/api/newsfeed/posts/:postId/comments::method',
+
+    auth.authenticate,
+    routeObjectFunctions('method', comments.methods.POST),
+);
+
+router.get('/api/newsfeed/posts/:postId/comments',
+
+    auth.authenticate,
+    comments.GET
+);
+
+router.get('/api/newsfeed/posts/:postId/comments/:commentId',
+
+    auth.authenticate,
+    comments.commentId.GET,
+);
+
+router.delete('/api/newsfeed/posts/:postId/comments/:commentId',
+
+    auth.authenticate,
+    comments.commentId.DELETE,
+);
+
+exports.router = router;
+exports.name = 'Newsfeed';

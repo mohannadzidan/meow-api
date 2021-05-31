@@ -1,11 +1,10 @@
-const { respondsWithJson, routeObjectFunctions } = require('../middleware/common.js');
-const { JsonParser } = require('../parsers.js');
+const { routeObjectFunctions } = require('../middleware/common.js');
 const { authenticate } = require('./auth.js');
 const { db } = require('../db');
-const { requireParams, converters } = require('../query-params');
+const { converters } = require('../query-params');
 const { handleInternalError, respondWithError, Errors } = require('../errors.js');
-const { Q } = require('../query-builder');
-
+const { selectSpecificFieldsRaw } = require('../endpoints-features.js');
+const router = require('express').Router();
 const users = {
     GET: {
         /**
@@ -24,7 +23,7 @@ const users = {
                 }).then(account => {
                     if (account) {
                         delete account.password;
-                        res.status(200).send(account);
+                        res.status(200).json(account);
                     } else return Promise.reject(Errors.USER_NOT_FOUND);
                 }).catch(e => {
                     if (e === Errors.USER_NOT_FOUND) {
@@ -33,102 +32,161 @@ const users = {
                 });
             }
         }
-    }
+    },
+    posts: {
+        /**
+            * 
+            * @param {import('express').Request} req 
+            * @param {import('express').Response} res 
+            */
+        GET: function (req, res) {
+            const userId = converters.integer(req.params.userId);
+            if (userId === undefined) {
+                return respondWithError(res, Errors.USER_NOT_FOUND);
+            }
+            const before = converters.integer(req.query.before) ?? Number.MAX_SAFE_INTEGER;
+            const after = converters.integer(req.query.after) ?? 0;
+            // SELECT * FROM post_view WHERE userId = ${user} AND timestamp > ${after} AND timestamp < ${before} ORDER BY timestamp LIMIT 10; 
+            db.post_view.findMany({
+                where: {
+                    userId: userId,
+                    AND: {
+                        timestamp: { gt: after },
+                        AND: { timestamp: { lt: before } }
+                    }
+                },
+                orderBy: {
+                    timestamp: 'desc',
+                },
+                take: 10
+
+            }).then(posts => {
+                res.status(200).json(posts);
+            }).catch(e => handleInternalError(res, e));
+        },
+
+    },
 }
 
 const followings = {
+    allowedFields: {
+        id: true,
+        email: true,
+        username: true,
+        displayName: true,
+        displayImageUrl: true,
+        birthdate: true,
+        location: true,
+        bio: true,
+        registrationTimestamp: true,
+        followersCount: true,
+        followingsCount: true,
+    },
     id: {
-        POST: {
-            /**
+        methods: {
+            POST: {
+                /**
              * 
              * @param {import('express').Request} req 
              * @param {import('express').Response} res 
              */
-            root: function (req, res) {
-                const queriedId = converters.integer(req.params.queriedId);
-                const userId = converters.integer(req.params.userId);
-                const value = req.body.value;
-                if (value === undefined || typeof value !== 'boolean') {
-                    respondWithError(res, Errors.BAD_REQUEST);
-                    return;
-                }
-                if (queriedId === undefined) {
-                    respondWithError(res, Errors.USER_NOT_FOUND);
-                    return;
-                }
-                if (req.auth.id !== userId) {
-                    respondWithError(res, Errors.PERMISSION_DENIED);
-                    return;
-                }
-                db.user.findFirst({
-                    where: { id: queriedId }
-                }).then(queriedUser => {
-                    if (queriedUser) {
-                        return db.follow.findFirst({ where: { firstId: userId, secondId: queriedId } });
-                    } else {
-                        return Promise.reject(Errors.USER_NOT_FOUND);
+                toggle: function (req, res) {
+                    const queriedId = converters.integer(req.params.queriedId);
+                    const userId = converters.integer(req.params.userId);
+                    if (queriedId === undefined) {
+                        respondWithError(res, Errors.USER_NOT_FOUND);
+                        return;
                     }
-                }).then(follow => {
-                    const isFollowing = follow !== undefined;
-                    if (isFollowing !== value && value === true) {
-                        return db.follow.create({ data: { firstId: userId, secondId: queriedId } });
-                    } else if (isFollowing !== value && value === false) {
-                        return db.$queryRaw`DELETE FROM follow WHERE firstId = ${userId} AND secondId = ${queriedId}`;
+                    if (req.auth.id !== userId) {
+                        respondWithError(res, Errors.PERMISSION_DENIED);
+                        return;
                     }
-                }).then(() => {
-                    res.status(201).send({ value: value });
-                }).catch(err => {
-                    if (err === Errors.USER_NOT_FOUND) {
-                        respondWithError(res, err);
-                    } else {
-                        handleInternalError(res, err);
-                    }
-                });
+                    db.user.findFirst({
+                        where: { id: queriedId }
+                    }).then(queriedUser => {
+                        if (queriedUser) {
+                            return db.follow.findFirst({ where: { firstId: userId, secondId: queriedId } });
+                        } else {
+                            return Promise.reject(Errors.USER_NOT_FOUND);
+                        }
+                    }).then(follow => {
+                        if (!follow) {
+                            return db.follow.create({ data: { firstId: userId, secondId: queriedId } });
+                        } else {
+                            return db.$queryRaw`DELETE FROM follow WHERE firstId = ${userId} AND secondId  = ${queriedId}`;
+                        }
+                    }).then((x) => {
+                        let state = !Array.isArray(x);
+                        res.status(201).json({ value: state });
+                    }).catch(err => {
+                        if (err === Errors.USER_NOT_FOUND) {
+                            respondWithError(res, err);
+                        } else {
+                            handleInternalError(res, err);
+                        }
+                    });
 
-            },
-            /**
-             * 
-             * @param {import('express').Request} req 
-             * @param {import('express').Response} res 
-             */
-            toggle: function (req, res) {
-                const queriedId = converters.integer(req.params.queriedId);
-                const userId = converters.integer(req.params.userId);
-                if (queriedId === undefined) {
-                    respondWithError(res, Errors.USER_NOT_FOUND);
-                    return;
-                }
-                if (req.auth.id !== userId) {
-                    respondWithError(res, Errors.PERMISSION_DENIED);
-                    return;
-                }
-                db.user.findFirst({
-                    where: { id: queriedId }
-                }).then(queriedUser => {
-                    if (queriedUser) {
-                        return db.follow.findFirst({ where: { firstId: userId, secondId: queriedId } });
-                    } else {
-                        return Promise.reject(Errors.USER_NOT_FOUND);
-                    }
-                }).then(follow => {
-                    if (!follow) {
-                        return db.follow.create({ data: { firstId: userId, secondId: queriedId } });
-                    } else {
-                        return db.$queryRaw`DELETE FROM follow WHERE firstId = ${userId} AND secondId  = ${queriedId}`;
-                    }
-                }).then((x) => {
-                    let state = !Array.isArray(x); 
-                    res.status(201).send({ value: state});
-                }).catch(err => {
-                    if (err === Errors.USER_NOT_FOUND) {
-                        respondWithError(res, err);
-                    } else {
-                        handleInternalError(res, err);
-                    }
-                });
-
-            },
+                },
+            }
         },
+        /**
+         * 
+         * @param {import('express').Request} req 
+         * @param {import('express').Response} res 
+         */
+        POST: function (req, res) {
+            const targetId = converters.integer(req.params.targetId);
+            const sourceId = converters.integer(req.params.sourceId);
+            if (targetId === undefined) {
+                respondWithError(res, Errors.USER_NOT_FOUND);
+                return;
+            }
+            if (req.auth.id !== sourceId) {
+                respondWithError(res, Errors.PERMISSION_DENIED);
+                return;
+            }
+            db.follow.create({
+                data: { firstId: sourceId, secondId: targetId }
+            }).then((x) => {
+                res.status(204).json(x);
+            }).catch(e => {
+                if (e.code = 'P2002' && e.meta.field_name === 'secondId') {
+                    respondWithError(res, Errors.USER_NOT_FOUND);
+                } else if (e.code = 'P2002' && e.meta.target === 'PRIMARY') {
+                    respondWithError(res, Errors.ALREADY_FOLLOWING);
+                } else {
+                    handleInternalError(res, e);
+                }
+            });
+
+        },
+        /**
+         * 
+         * @param {import('express').Request} req 
+         * @param {import('express').Response} res 
+         */
+        DELETE: function (req, res) {
+            const targetId = converters.integer(req.params.targetId);
+            const sourceId = converters.integer(req.params.sourceId);
+            if (targetId === undefined) {
+                respondWithError(res, Errors.USER_NOT_FOUND);
+                return;
+            }
+            if (sourceId !== req.auth.id) {
+                respondWithError(res, Errors.PERMISSION_DENIED);
+                return;
+            }
+            db.$executeRaw`DELETE FROM follow WHERE firstId = ${sourceId} AND secondId = ${targetId} LIMIT 1`.then((affectedRows) => {
+                if (affectedRows === 0) return Promise.reject(Errors.WAS_NOT_FOLLOWING);
+                res.status(204).json();
+            }).catch(err => {
+                if (err === Errors.WAS_NOT_FOLLOWING) {
+                    respondWithError(res, err);
+                } else handleInternalError(res, err);
+            });
+
+        },
+
     },
 
     /**
@@ -139,6 +197,22 @@ const followings = {
     GET: function (req, res) {
         const queriedId = converters.integer(req.params.userId);
         const offset = converters.integer(req.query.offset) ?? 0;
+        const fields = req.query.fields;
+        let select = 'user_view.*';
+        let limit = 10;
+        let singleField = false;
+        if (fields) {
+            select = selectSpecificFieldsRaw(fields, followings.allowedFields, 'user_view');
+            if (select === undefined) {
+                respondWithError(res, Errors.BAD_REQUEST, { target: 'fields' });
+                return;
+            }
+            // select 10x the limit if only one field
+            if (fields.indexOf(',') === -1) {
+                singleField = true;
+                limit *= 10;
+            }
+        }
         if (queriedId === undefined) {
             respondWithError(res, Errors.USER_NOT_FOUND);
             return;
@@ -147,18 +221,21 @@ const followings = {
             where: { id: queriedId }
         }).then(user => {
             if (user) {
-                return db.$queryRaw`SELECT 
-                                        user_view.* 
+                return db.$queryRaw(`SELECT 
+                                        ${select}
                                     FROM 
                                         follow INNER JOIN user_view ON follow.secondId = user_view.id  
                                     WHERE 
                                         firstId = ${queriedId} 
-                                    LIMIT ${offset}, ${10};`;
+                                    LIMIT ${offset}, ${limit};`);
             } else {
                 return Promise.reject(Errors.USER_NOT_FOUND);
             }
         }).then(followers => {
-            res.status(200).send(followers);
+            if(singleField){
+                followers = followers.map(x => x[fields]);
+            }
+            res.status(200).json(followers);
         }).catch(err => {
             if (err === Errors.USER_NOT_FOUND) {
                 respondWithError(res, err);
@@ -169,10 +246,11 @@ const followings = {
     },
     /**
      * 
+     * Experimental
      * @param {import('express').Request} req 
      * @param {import('express').Response} res 
      */
-    patch: function (req, res) {
+    PATCH: function (req, res) {
         const queriedId = converters.integer(req.params.userId);
         if (queriedId === undefined) {
             respondWithError(res, Errors.USER_NOT_FOUND);
@@ -227,13 +305,26 @@ const followings = {
                 const changed = {}
                 follows.forEach(x => changed[x] = true);
                 unFollows.forEach(x => changed[x] = false);
-                res.status(200).send(changed)
+                res.status(200).json(changed)
             }).catch(err => handleInternalError(res, err));
         })
     }
 }
 
 const followers = {
+    allowedFields: {
+        id: true,
+        email: true,
+        username: true,
+        displayName: true,
+        displayImageUrl: true,
+        birthdate: true,
+        location: true,
+        bio: true,
+        registrationTimestamp: true,
+        followersCount: true,
+        followingsCount: true,
+    },
     /**
      * 
      * @param {import('express').Request} req 
@@ -246,22 +337,34 @@ const followers = {
             respondWithError(res, Errors.USER_NOT_FOUND);
             return;
         }
+        const fields = req.query.fields;
+        let select = 'user_view.*';
+        let limit = 10;
+        if (fields) {
+            select = selectSpecificFieldsRaw(fields, followers.allowedFields, 'user_view');
+            if (select === undefined) {
+                respondWithError(res, Errors.BAD_REQUEST, { target: 'fields' });
+                return;
+            }
+            // select 10x the limit if only one field
+            if (fields.indexOf(',') === -1) limit *= 10;
+        }
         db.user.findFirst({
             where: { id: queriedId }
         }).then(user => {
             if (user) {
-                return db.$queryRaw`SELECT 
-                                        user_view.* 
+                return db.$queryRaw(`SELECT 
+                                        ${select} 
                                     FROM 
                                         follow INNER JOIN user_view ON follow.firstId = user_view.id  
                                     WHERE 
                                         secondId = ${queriedId} 
-                                    LIMIT ${offset}, ${10};`;
+                                    LIMIT ${offset}, ${limit};`);
             } else {
                 return Promise.reject(Errors.USER_NOT_FOUND);
             }
         }).then(followers => {
-            res.status(200).send(followers);
+            res.status(200).json(followers);
         }).catch(err => {
             if (err === Errors.USER_NOT_FOUND) {
                 respondWithError(res, err);
@@ -271,44 +374,44 @@ const followers = {
         })
     },
 }
-/**
- * 
- * @param {import('express').Express} app 
- */
-exports.init = function (app) {
-    app.get('/api/people/users::method',
-        JsonParser,
-        respondsWithJson,
-        authenticate,
-        routeObjectFunctions('method', users.GET),
-    );
-
-    app.get('/api/people/:userId/followers',
-        JsonParser,
-        respondsWithJson,
-        authenticate,
-        followers.GET,
-    );
-
-    app.get('/api/people/:userId/followings',
-        JsonParser,
-        respondsWithJson,
-        authenticate,
-        followings.GET,
-    );
-    app.post('/api/people/:userId/followings/:queriedId::method',
-        JsonParser,
-        respondsWithJson,
-        authenticate,
-        routeObjectFunctions('method', followings.id.POST),
-    );
-    app.post('/api/people/:userId/followings/:queriedId',
-        JsonParser,
-        respondsWithJson,
-        authenticate,
-        followings.id.POST.root,
-    );
 
 
-}
-exports.moduleName = 'people';
+router.get('/api/people/users::method',
+    authenticate,
+    routeObjectFunctions('method', users.GET),
+);
+
+router.get('/api/people/:userId/posts',
+    authenticate,
+    users.posts.GET,
+);
+
+router.get('/api/people/:userId/followers',
+    authenticate,
+    followers.GET,
+);
+
+router.get('/api/people/:userId/followings',
+    authenticate,
+    followings.GET,
+);
+
+router.post('/api/people/:userId/followings/:queriedId::method',
+    authenticate,
+    routeObjectFunctions('method', followings.id.POST),
+);
+
+router.post('/api/people/:sourceId/followings/:targetId',
+    authenticate,
+    followings.id.POST,
+);
+
+router.delete('/api/people/:sourceId/followings/:targetId',
+    authenticate,
+    followings.id.DELETE,
+);
+
+
+
+exports.router = router;
+exports.name = 'People';

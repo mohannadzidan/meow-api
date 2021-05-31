@@ -43,6 +43,14 @@ const Errors = {
         code: 403,
         message: 'PERMISSION_DENIED'
     },
+    WAS_NOT_FOLLOWING:{
+        code: 400,
+        message: 'FOLLOW_NOT_EXIST'
+    },
+    ALREADY_FOLLOWING:{
+        code: 400,
+        message: 'FOLLOW_ALREADY_EXISTS'
+    },
     Value: {
         VALUE_IS_VERY_LONG: {
             code: 400,
@@ -95,7 +103,7 @@ function respondWithError(res, error, meta = undefined) {
     if (meta) {
         error = { ...error, meta: meta }
     }
-    res.status(error.code).send(error);
+    res.status(error.code).json(error);
 }
 /**
  * 
@@ -103,15 +111,15 @@ function respondWithError(res, error, meta = undefined) {
  * @param {*} err 
  */
 function handleInternalError(res, err) {
-    res.status(500).send(Errors.INTERNAL_ERROR);
+    res.status(500).json(Errors.INTERNAL_ERROR);
     console.error(err);
 }
 
 function handleTokenError(res, err, type) {
     if (err.name === 'TokenExpiredError')
-        res.status(401).send({ code: 'EXPIRED_' + type.toUpperCase() + '_TOKEN', message: err.message });
+        res.status(401).json({ code: 'EXPIRED_' + type.toUpperCase() + '_TOKEN', message: err.message });
     else
-        res.status(401).send({ code: 'INVALID_' + type.toUpperCase() + '_TOKEN', message: err.message });
+        res.status(401).json({ code: 'INVALID_' + type.toUpperCase() + '_TOKEN', message: err.message });
 }
 
 exports.handleInternalError = handleInternalError;

@@ -4,15 +4,18 @@
   "description": "",
   "main": "server.js",
   "scripts": {
-    "test": "mocha test",
+    "test": "mocha test  --timeout 5000",
     "start": "title Meow Server && nodemon",
+    "server": "title Meow Server && node server",
     "rebase-prisma": "npx prisma introspect && npx prisma generate",
     "prisma-client": "npx prisma generate"
   },
   "author": "Mohannad Zidan",
   "license": "MIT",
   "devDependencies": {
+    "chai": "^4.3.4",
     "mocha": "^8.4.0",
+    "node-fetch": "^2.6.1",
     "nodemon": "^2.0.7",
     "prisma": "^2.21.2"
   },

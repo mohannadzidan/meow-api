@@ -3,6 +3,7 @@
         "scope": "markdown",
         "prefix": "endpoint",
         "body": [
+            "\n<br>\n",
             "### ${1:Title}",
             "You can $2 by issuing an HTTP ${6:POST} request to the ${3:API} `${4:endpointName}` endpoint",
             "\n**Implemented**",
@@ -23,6 +24,7 @@
         "scope": "markdown",
         "prefix": "aendpoint",
         "body": [
+            "\n<br>\n",
             "### ${1:Title}",
             "You can $2 by issuing an HTTP ${6:POST} request to the ${3:API} `${4:endpointName}` endpoint",
             "\n**Implemented**",
@@ -71,13 +73,12 @@
     },
     "Markdown query param": {
         "scope": "markdown",
-        "prefix": "param",
+        "prefix": "params",
         "body": [
-            "#### ${1:param}",
-            "\nThe `${1:param}` request parameter $2",
-            "```",
-            "http/${3:[HOST]}/$4/${5:endpointName}?${1:param}=$6",
-            "```"
+            "#### Query parameters",
+            "| Parameter | Required | Default | description |",
+            "| - | - | - | - |",
+            "| $1 | $2 | $3 |$4 |",
         ],
         "description": "Log output to console"
     },
@@ -94,16 +95,28 @@
         "scope": "markdown",
         "prefix": "param-after-before",
         "body": [
-            "#### before",
-            "\nThe `before` request parameter limits the results to only $1 before this timestamp (default value is ***now***).",
-            "```",
-            "http/[HOST]/api/$2/$3?before=TIMESTAMP",
-            "```",
-            "\n#### after",
-            "\nThe `after` request parameter limits the results to only $4 after this timestamp (default value is ***0***).",
-            "```",
-            "http/[HOST]/api/$2/$3?after=TIMESTAMP",
-            "```",
+            "#### Query parameters",
+            "| Parameter | Required | Default | description |",
+            "| - | - | - | - |",
+            "| before | Optional | MAX_VALUE | limits the results to only $1 created before this timestamp. |",
+            "| after | Optional | 0 | limits the results to only $1 created after this timestamp. |",
+        ]
+    },
+    "Path vairables": {
+        "scope": "markdown",
+        "prefix": "table-path-variables",
+        "body": [
+            "#### Path variables",
+            "| Variable | Required | Description |",
+            "| -------- | -------- | ----------- |",
+            "| $1 | $2 | $3 |",
+        ]
+    },
+    "entity": {
+        "scope": "markdown",
+        "prefix": "entity",
+        "body": [
+            "[`$1`](#$1-entity) "
         ]
     }
 }
