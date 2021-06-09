@@ -1,13 +1,13 @@
 
 /**
  * 
- * @param {string} param 
+ * @paramName {string} paramName 
  * @param {Object} object 
  * @returns 
  */
-function routeObjectFunctions(param, object) {
+function routeObjectFunctions(paramName, object) {
     return (req, res, next) => {
-        const f = req.params[param];
+        const f = req.params[paramName];
         if (typeof object[f] === 'function') {
             object[f](req, res, next)
         } else {
