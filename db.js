@@ -9,5 +9,9 @@ function twoDigits(d) {
 Date.prototype.toMySQLFormat = function () {
     return this.getUTCFullYear() + "-" + twoDigits(1 + this.getUTCMonth()) + "-" + twoDigits(this.getUTCDate()) + " " + twoDigits(this.getUTCHours()) + ":" + twoDigits(this.getUTCMinutes()) + ":" + twoDigits(this.getUTCSeconds());
 };
-
 exports.db = prisma;
+
+exports.PrismaErrorCodes = {
+    UNIQUE_CONSTRAINT_FAILED: 'P2002',
+    FOREIGN_KEY_CONSTRAINT_FAILED: 'P2003'
+}
