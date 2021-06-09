@@ -43,13 +43,21 @@ const Errors = {
         code: 403,
         message: 'PERMISSION_DENIED'
     },
-    WAS_NOT_FOLLOWING:{
+    WAS_NOT_FOLLOWING: {
         code: 400,
         message: 'FOLLOW_NOT_EXIST'
     },
-    ALREADY_FOLLOWING:{
+    ALREADY_FOLLOWING: {
         code: 400,
         message: 'FOLLOW_ALREADY_EXISTS'
+    },
+    ALREADY_LIKED: {
+        code: 400,
+        message: 'ALREADY_LIKED',
+    },
+    LIKE_NOT_FOUND: {
+        code: 400,
+        message: 'LIKE_NOT_FOUND',
     },
     Value: {
         VALUE_IS_VERY_LONG: {
