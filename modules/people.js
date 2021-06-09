@@ -1,6 +1,6 @@
 const { routeObjectFunctions } = require('../middleware/common.js');
 const { authenticate } = require('./auth.js');
-const { db } = require('../db');
+const { db, PrismaErrorCodes } = require('../db');
 const { converters } = require('../query-params');
 const { handleInternalError, respondWithError, Errors } = require('../errors.js');
 const { selectSpecificFieldsRaw, selectSpecificFields } = require('../endpoints-features.js');
@@ -16,6 +16,7 @@ const users = {
             const by = req.query.id ? 'id' : req.query.username ? 'username' : undefined;
             const value = by == 'id' ? converters.integer(req.query.id) : req.query.username;
             if (by) {
+                let acc;
                 db.user_view.findFirst({
                     where: {
                         [by]: value
@@ -23,8 +24,19 @@ const users = {
                 }).then(account => {
                     if (account) {
                         delete account.password;
-                        res.status(200).json(account);
+                        acc = account;
+                        return db.follow.findMany({
+                            select: {
+                                secondId: true,
+                            },
+                            where: {
+                                firstId: req.auth.id
+                            }
+                        });
                     } else return Promise.reject(Errors.USER_NOT_FOUND);
+                }).then(followings => {
+                    acc.followed = followings.find(f => f.secondId === acc.id) !== undefined;
+                    res.status(200).json(acc);
                 }).catch(e => {
                     if (e === Errors.USER_NOT_FOUND) {
                         respondWithError(res, e);
@@ -46,21 +58,8 @@ const users = {
             }
             const before = converters.integer(req.query.before) ?? Number.MAX_SAFE_INTEGER;
             const after = converters.integer(req.query.after) ?? 0;
-            // SELECT * FROM post_view WHERE userId = ${user} AND timestamp > ${after} AND timestamp < ${before} ORDER BY timestamp LIMIT 10; 
-            db.post_view.findMany({
-                where: {
-                    userId: userId,
-                    AND: {
-                        timestamp: { gt: after },
-                        AND: { timestamp: { lt: before } }
-                    }
-                },
-                orderBy: {
-                    timestamp: 'desc',
-                },
-                take: 10
-
-            }).then(posts => {
+            return db.$queryRaw`SELECT *, EXISTS(select postId from post_like WHERE userId = ${req.auth.id} AND postId = id) as liked FROM post_view WHERE userId = ${userId} AND timestamp < ${before} AND timestamp > ${after} ORDER BY timestamp DESC LIMIT 10;`.then(posts => {
+                posts.forEach(post => post.liked = post.liked ? true : false);
                 res.status(200).json(posts);
             }).catch(e => handleInternalError(res, e));
         },
@@ -106,14 +105,14 @@ const followings = {
                     }).then(() => {
                         res.status(201).json({ state: true });
                     }).catch(err => {
-                        if (err.code === 'P2002') {
+                        if (err.code === PrismaErrorCodes.UNIQUE_CONSTRAINT_FAILED) {
                             return db.follow.delete({
                                 where: {
                                     firstId_secondId: { firstId: userId, secondId: queriedId }
                                 }
                             });
                             //respondWithError(res, Errors.USER_NOT_FOUND);
-                        } else if (err.code === 'P2003') {
+                        } else if (err.code === PrismaErrorCodes.FOREIGN_KEY_CONSTRAINT_FAILED) {
                             respondWithError(res, Errors.USER_NOT_FOUND);
                         } else {
                             handleInternalError(res, err);
@@ -121,7 +120,7 @@ const followings = {
                         return false;
                     }).then((ok) => {
                         if (ok) {
-                            res.status(201).json({state: false});
+                            res.status(201).json({ state: false });
                         }
                     });
 
@@ -149,9 +148,9 @@ const followings = {
             }).then((x) => {
                 res.status(204).json(x);
             }).catch(e => {
-                if (e.code = 'P2002' && e.meta.field_name === 'secondId') {
+                if (e.code = PrismaErrorCodes.UNIQUE_CONSTRAINT_FAILED && e.meta.field_name === 'secondId') {
                     respondWithError(res, Errors.USER_NOT_FOUND);
-                } else if (e.code = 'P2002' && e.meta.target === 'PRIMARY') {
+                } else if (e.code = PrismaErrorCodes.UNIQUE_CONSTRAINT_FAILED && e.meta.target === 'PRIMARY') {
                     respondWithError(res, Errors.ALREADY_FOLLOWING);
                 } else {
                     handleInternalError(res, e);
@@ -196,7 +195,7 @@ const followings = {
             */
             suggest: function (req, res) {
                 const authId = req.auth.id;
-                if(req.params.sourceId != authId){
+                if (req.params.sourceId != authId) {
                     respondWithError(res, Errors.PERMISSION_DENIED);
                     return;
                 }
@@ -220,7 +219,7 @@ const followings = {
                     if (followings.length > 0) {
                         return db.$queryRaw(`
                         SELECT ${selection.select}, count(user_view.id) as connections FROM user_view INNER JOIN follow ON follow.secondId = user_view.id 
-                        WHERE follow.firstId IN (${followings.join(',')}) AND user_view.id <> ${authId}  GROUP BY user_view.id ORDER BY connections DESC LIMIT ${offset}, ${selection.limit};
+                        WHERE follow.firstId IN (${followings.join(',')}) AND follow.secondId NOT IN (${followings.join(',')}) AND user_view.id <> ${authId}  GROUP BY user_view.id ORDER BY connections DESC LIMIT ${offset}, ${selection.limit};
                         `);
                     }
                     return [];
@@ -246,20 +245,29 @@ const followings = {
             respondWithError(res, err);
             return;
         }
+
         db.user.findFirst({
             where: { id: queriedId }
         }).then(user => {
             if (user) {
-                return db.$queryRaw(`SELECT 
-                                        ${selection.select}
-                                    FROM 
-                                        follow INNER JOIN user_view ON follow.secondId = user_view.id  
-                                    WHERE 
-                                        firstId = ${queriedId} 
-                                    LIMIT ${offset}, ${selection.limit};`);
+                return db.follow.findMany({
+                    select: {
+                        secondId: true,
+                    },
+                    where: {
+                        firstId: authId
+                    }
+                });
+
             } else {
                 return Promise.reject(Errors.USER_NOT_FOUND);
             }
+        }).then(followings => {
+            followings = followings.map(x => x.secondId);
+            return db.$queryRaw(`SELECT ${selection.select}, IF(user_view.id IN (${followings.join()}), TRUE, FALSE)AS followed
+                FROM follow INNER JOIN user_view ON follow.secondId = user_view.id  
+                WHERE firstId = ${queriedId} LIMIT ${offset}, ${selection.limit};`);
+
         }).then(followings => {
             if (selection.isSingleField) {
                 followings = followings.map(x => x[req.query.fields]);
